@@ -88,29 +88,37 @@
 //   console.log(`✅ Server running on http://localhost:${PORT}`);
 // });
 
+// index.cjs (replace your file with this)
 const express = require("express");
-const bodyParser = require("body-parser");
-
 const app = express();
 
-// Middleware to parse JSON
-app.use(bodyParser.json());
-
-// Middleware: sanitize curly quotes → straight quotes
+// Raw-body middleware — normalize smart quotes to straight quotes, then parse JSON
 app.use((req, res, next) => {
-  if (req.body && typeof req.body === "object") {
-    let jsonString = JSON.stringify(req.body);
-    jsonString = jsonString.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
-    try {
-      req.body = JSON.parse(jsonString);
-    } catch (err) {
-      return res.status(400).json({ is_success: false, message: "Invalid JSON format" });
+  let raw = "";
+  req.setEncoding("utf8");
+  req.on("data", chunk => (raw += chunk));
+  req.on("end", () => {
+    if (!raw) {
+      req.body = {};
+      return next();
     }
-  }
-  next();
+
+    // Replace curly smart quotes with straight quotes
+    const normalized = raw.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+
+    try {
+      req.body = JSON.parse(normalized);
+    } catch (err) {
+      // If still invalid JSON, set empty body and keep raw for debugging
+      req.body = {};
+      req.rawBody = normalized;
+    }
+    next();
+  });
 });
 
-const FULL_NAME = "gautam_singh";  // lowercase as per requirement
+// constants
+const FULL_NAME = "gautam_singh"; // requirement: lowercase_underscored
 const DOB = "15062004";
 const EMAIL = "gautamsingh@xyz.com";
 const ROLL_NUMBER = "22BSA10140";
@@ -122,40 +130,47 @@ function alternatingCapsReverse(arr) {
     .join("");
 }
 
-// ✅ GET route so browser works
+// quick GET so visiting the URL in browser shows something
 app.get("/bfhl", (req, res) => {
   res.status(200).json({ operation_code: 1 });
 });
 
-// ✅ POST route for main logic
 app.post("/bfhl", (req, res) => {
   try {
-    const data = req.body.data;
+    // Accept data from parsed body or (if parse failed) try to parse req.rawBody
+    let data = req.body && req.body.data;
+    if (!data && req.rawBody) {
+      try {
+        const parsed = JSON.parse(req.rawBody);
+        data = parsed && parsed.data;
+      } catch (e) {
+        data = undefined;
+      }
+    }
+
     if (!Array.isArray(data)) {
       return res.status(400).json({ is_success: false, message: "data must be an array" });
     }
 
-    let odd_numbers = [];
-    let even_numbers = [];
-    let alphabets = [];
-    let special_characters = [];
+    const odd_numbers = [];
+    const even_numbers = [];
+    const alphabets = [];
+    const special_characters = [];
     let sum = 0;
 
-    data.forEach(item => {
-      if (/^\d+$/.test(item)) {
-        let num = parseInt(item, 10);
-        if (num % 2 === 0) {
-          even_numbers.push(item);
-        } else {
-          odd_numbers.push(item);
-        }
+    for (const item of data) {
+      const s = String(item);
+
+      if (/^\d+$/.test(s)) {
+        const num = parseInt(s, 10);
+        (num % 2 === 0 ? even_numbers : odd_numbers).push(String(num)); // numbers returned as strings
         sum += num;
-      } else if (/^[a-zA-Z]+$/.test(item)) {
-        alphabets.push(item.toUpperCase());
+      } else if (/^[a-zA-Z]+$/.test(s)) {
+        alphabets.push(s.toUpperCase());
       } else {
-        special_characters.push(item);
+        special_characters.push(s);
       }
-    });
+    }
 
     const response = {
       is_success: true,
@@ -166,7 +181,7 @@ app.post("/bfhl", (req, res) => {
       even_numbers,
       alphabets,
       special_characters,
-      sum: sum.toString(),
+      sum: String(sum),
       concat_string: alternatingCapsReverse(alphabets)
     };
 
@@ -177,7 +192,5 @@ app.post("/bfhl", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
 
